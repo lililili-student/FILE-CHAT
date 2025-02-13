@@ -202,19 +202,135 @@ def client():
             sender()
             
     client_socket.close()
+def udpserver():
+    from time import sleep
+    import socket
+    udp_addr = ('127.0.0.1', 9999)
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # 绑定端口
+    udp_socket.bind(udp_addr)
+ 
+    # 等待接收对方发送的数据
+    while True:
+        recv_data = udp_socket.recvfrom(1024)  # 1024表示本次接收的最大字节数
+        # 打印接收到的数据
+        print("[From %s:%d]:%s" % (recv_data[1][0], recv_data[1][1], recv_data[0].decode("utf-8")))
+        if recv_data[0].decode("utf-8") == 'sendF':
+            import socket
+            import struct
+            import os
+            from tqdm import tqdm  # 导入tqdm库
+
+            def read_until_null(sock, max_length=4096):
+                """读取数据直到遇到NULL终止符"""
+                buffer = bytearray()
+                while True:
+                    chunk = sock.recv(1)
+                    if not chunk:
+                        raise ConnectionError("连接中断")
+                    buffer.extend(chunk)
+                    if chunk == b'\x00':
+                        break
+                    if len(buffer) > max_length:
+                        raise ValueError("文件名过长")
+                return buffer[:-1]  # 排除NULL终止符
+
+            HOST = '0.0.0.0'
+            PORT = 5000
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((HOST, PORT))
+                s.listen()
+                print(f"服务器已启动，正在 {HOST}:{PORT} 监听...")
+    
+                conn, addr = s.accept()
+                with conn:
+                    print(f"已连接客户端: {addr}")
+        
+                    try:
+                        # 接收文件大小（8字节）
+                        file_size_bytes = conn.recv(8)
+                        if len(file_size_bytes) != 8:
+                            raise ValueError("无效的文件大小头")
+                        file_size = struct.unpack('!Q', file_size_bytes)[0]  # 使用8字节无符号整数
+            
+                        # 接收文件名（NULL终止）
+                        filename_bytes = read_until_null(conn)
+                        filename = filename_bytes.decode()
+                        print(f"正在接收文件: {filename} (大小: {file_size} 字节)")
+            
+                        # 接收文件内容
+                        received = 0
+                        with open(filename, 'wb') as f, tqdm(
+                            total=file_size,  # 总大小
+                            unit='B',        # 单位
+                            unit_scale=True,  # 自动缩放单位
+                            desc=f"接收 {filename}",  # 进度条描述
+                            ncols=80          # 进度条宽度
+                        ) as pbar:
+                            while received < file_size:
+                                data = conn.recv(min(4096, file_size - received))
+                                if not data:
+                                    raise ConnectionError("连接提前关闭")
+                                f.write(data)
+                                received += len(data)
+                                pbar.update(len(data))
+                                if received == file_size:
+                                    break# 更新进度条
+            
+                        if received == file_size:
+                            print("文件接收完成")
+                        else:
+                            print(f"警告: 文件不完整 (已接收 {received}/{file_size} 字节)")
+
+                    except Exception as e:
+                        print(f"传输错误: {str(e)}")
+                        # 删除不完整文件
+                        if 'filename' in locals():
+                            if os.path.exists(filename):
+                                os.remove(filename)
+            
+def udpclient():
+    from time import sleep
+    import socket
+    # udp 通信地址，IP+端口号
+    udp_addr = (ip, 9999)
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # 发送数据到指定的ip和端口,每隔1s发送一次，发送10次
+    while True :
+        word = input("YOU(sendF去发送文件）:")
+        for i in range(1):
+            if word == 'sendF':
+                udp_socket.sendto((word) .encode('utf-8'), udp_addr)
+                time.sleep(3)
+                sender()
+                
+            udp_socket.sendto((word) .encode('utf-8'), udp_addr)
+            print("send %d message")
+            sleep(1)
+    # 5. 关闭套接字
+    udp_socket.close()
+
 # 主程序入口
 if __name__ == '__main__':
     # 创建数据库
+    print("(udp聊天不需要同时启动程序握手，随时开随时发。但依旧保留了tcp聊天)/n")
+    print("UDP or TCP ？/n")
     create_db()
-    role = input("u can typoe record to show records or enter to continue:")
+    role = input("输入record来获取聊天记录:")
     if role == 'record':
         get_chat_records()
         time.sleep(30)
-    else:
+    elif role == 'UDP':
+        thread3 = Thread(target=udpserver, args=())
+        thread4 = Thread(target=udpclient, args=())
+        thread3.start()  # 线程1开始
+        thread4.start()
+    elif role == 'TCP':
         thread1 = Thread(target=server, args=())
         thread2 = Thread(target=client, args=())
         thread1.start()  # 线程1开始
-        thread2.start()  # 线程2开始
+        thread2.start()
         time.sleep(30)
-
-    time.sleep(5)
+    else:
+       time.sleep(5)
