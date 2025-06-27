@@ -601,9 +601,9 @@ class ChatApplication:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    print("DEBUG")
-    n = input(":")
-    if n == "VERSION" :
-        print("0.3.4")
+    #print("DEBUG")
+    #n = input(":")
+    #if n == "VERSION" :
+        #print("0.3.4")
     app = ChatApplication(root)
     root.mainloop()
