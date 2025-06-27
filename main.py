@@ -221,7 +221,7 @@ class ChatApplication:
         self.status_var.set("TCP服务器启动中...")
         try:
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.settimeout(1.0)  # 设置超时
+            server_socket.settimeout(50.0)  # 设置超时
             server_socket.bind(('0.0.0.0', 12345))
             server_socket.listen(1)
             self.status_var.set("TCP服务器已启动，等待连接...")
@@ -231,7 +231,7 @@ class ChatApplication:
                     client_socket, addr = server_socket.accept()
                     self.status_var.set(f"来自 {addr} 的连接")
                     
-                    client_socket.settimeout(1.0)  # 设置超时
+                    client_socket.settimeout(50.0)  # 设置超时
                     
                     while self.running:
                         try:
@@ -269,9 +269,9 @@ class ChatApplication:
         self.status_var.set("尝试连接到TCP服务器...")
         try:
             self.tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.tcp_client_socket.settimeout(5.0)  # 设置连接超时
+            self.tcp_client_socket.settimeout(50.0)  # 设置连接超时
             self.tcp_client_socket.connect((self.ip_address, 12345))
-            self.tcp_client_socket.settimeout(1.0)  # 设置后续超时
+            self.tcp_client_socket.settimeout(50.0)  # 设置后续超时
             self.status_var.set(f"已连接到 {self.ip_address}:12345")
         except socket.timeout:
             self.status_var.set("连接超时，请检查IP地址和网络")
@@ -283,7 +283,7 @@ class ChatApplication:
         try:
             udp_addr = ('0.0.0.0', 9999)
             udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udp_socket.settimeout(1.0)  # 设置超时
+            udp_socket.settimeout(50.0)  # 设置超时
             udp_socket.bind(udp_addr)
             self.status_var.set("UDP服务器已启动")
             
@@ -358,80 +358,56 @@ class ChatApplication:
             threading.Thread(target=self.send_file, daemon=True).start()
     
     def send_file(self):
-        if self.file_sending:
-            self.status_var.set("当前已有文件正在发送，请等待...")
-            return
-            
-        self.file_sending = True
-        try:
-            self.send_message_async('sendF')
-            self.status_var.set("选择要发送的文件...")
-            file_path = filedialog.askopenfilename()
-            if not file_path:
-                self.status_var.set("文件选择已取消")
-                self.file_sending = False
-                return
-                
-            if not os.path.isfile(file_path):
-                self.status_var.set("文件不存在或不是普通文件")
-                self.file_sending = False
-                return
-                
-            self.status_var.set(f"准备发送文件: {os.path.basename(file_path)}")
-            
-            # 先发送文件传输指令
-            self.send_message_async('sendF')
-            time.sleep(1)  # 等待对方准备
-            
-            # 现在发送文件
-            self.status_var.set(f"正在发送文件: {os.path.basename(file_path)}")
-            
-            HOST = self.ip_address
-            PORT = 5000
-            file_size = os.path.getsize(file_path)
-            file_basename = os.path.basename(file_path)
-            filename_bytes = file_basename.encode() + b'\x00'  # NULL终止文件名
+        self.send_message_async('sendF')
+        self.status_var.set("选择要发送的文件...")
+        filename = filedialog.askopenfilename()
+        import socket
+        import struct
+        import os
+        from tqdm import tqdm  # 导入tqdm库
 
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(10.0)  # 设置超时
-                try:
-                    s.connect((HOST, PORT))
-                except socket.timeout:
-                    self.status_var.set("连接超时，文件传输失败")
-                    self.file_sending = False
-                    return
-                
+        HOST = self.ip_address
+        PORT = 5000
+
+        if not os.path.isfile(filename):
+            print("文件不存在或不是普通文件")
+            exit(1)
+
+        file_size = os.path.getsize(filename)
+        file_basename = os.path.basename(filename)
+        filename_bytes = file_basename.encode() + b'\x00'  # NULL终止文件名
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((HOST, PORT))
+            print(f"已连接到服务器 {HOST}:{PORT}")
+    
+            try:
                 # 发送文件大小（8字节）
                 s.sendall(struct.pack('!Q', file_size))  # 使用8字节无符号整数
-            
+        
                 # 发送文件名（含NULL终止符）
                 s.sendall(filename_bytes)
-            
+        
                 # 发送文件内容
                 sent = 0
-                try:
-                    with open(file_path, 'rb') as f:
-                        while sent < file_size and self.running:
-                            data = f.read(4096)
-                            if not data:
-                                break
-                            s.sendall(data)
-                            sent += len(data)
-                            self.status_var.set(f"发送进度: {sent}/{file_size} 字节 ({sent/file_size*100:.1f}%)")
-                            self.root.update()
-                except Exception as e:
-                    self.status_var.set(f"文件发送错误: {str(e)}")
-            
-            if sent == file_size:
-                self.status_var.set(f"文件发送完成 (共发送 {sent} 字节)")
-                self.display_message(f"已发送文件: {file_basename}")
-            else:
-                self.status_var.set(f"文件发送中断 (已发送 {sent}/{file_size} 字节)")
-        except Exception as e:
-            self.status_var.set(f"文件发送错误: {str(e)}")
-        finally:
-            self.file_sending = False
-    
+                with open(filename, 'rb') as f, tqdm(
+                    total=file_size,  # 总大小
+                    unit='B',         # 单位
+                    unit_scale=True,  # 自动缩放单位
+                    desc=f"发送 {file_basename}",  # 进度条描述
+                    ncols=80         # 进度条宽度
+                ) as pbar:
+                    while sent < file_size:
+                        data = f.read(4096)
+                        s.sendall(data)
+                        sent += len(data)
+                        pbar.update(len(data))  # 更新进度条
+        
+                print(f"文件发送完成 (共发送 {sent} 字节)")
+
+            except Exception as e:
+                print(f"传输错误: {str(e)}")
+                
     def send_message_async(self, message):
         # 在后台线程中发送消息
         def send():
@@ -455,108 +431,80 @@ class ChatApplication:
         threading.Thread(target=send, daemon=True).start()
     
     def receive_file(self):
-        if self.file_receiving:
-            self.status_var.set("当前已有文件正在接收，请等待...")
-            return
-            
-        self.file_receiving = True
-        self.status_var.set("准备接收文件...")
-        
-        try:
-            HOST = '0.0.0.0'
-            PORT = 5000
+        import socket
+        import struct
+        import os
+        from tqdm import tqdm  # 导入tqdm库
 
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(10.0)  # 设置超时
-                s.bind((HOST, PORT))
-                s.listen()
-                self.status_var.set(f"文件接收服务器已启动，正在 {HOST}:{PORT} 监听...")
-                
-                try:
-                    conn, addr = s.accept()
-                except socket.timeout:
-                    self.status_var.set("文件接收超时")
-                    self.file_receiving = False
-                    return
-                    
-                with conn:
-                    self.status_var.set(f"已连接客户端: {addr}")
-                    conn.settimeout(10.0)  # 设置超时
+        def read_until_null(sock, max_length=4096):
+            """读取数据直到遇到NULL终止符"""
+            buffer = bytearray()
+            while True:
+                chunk = sock.recv(1)
+                if not chunk:
+                    raise ConnectionError("连接中断")
+                buffer.extend(chunk)
+                if chunk == b'\x00':
+                    break
+                if len(buffer) > max_length:
+                    raise ValueError("文件名过长")
+            return buffer[:-1]  # 排除NULL终止符
+
+        HOST = '0.0.0.0'
+        PORT = 5000
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((HOST, PORT))
+            s.listen()
+            print(f"服务器已启动，正在 {HOST}:{PORT} 监听...")
+    
+            conn, addr = s.accept()
+            with conn:
+                print(f"已连接客户端: {addr}")
         
+                try:
                     # 接收文件大小（8字节）
                     file_size_bytes = conn.recv(8)
                     if len(file_size_bytes) != 8:
-                        self.status_var.set("无效的文件大小头")
-                        self.file_receiving = False
-                        return
-                        
+                        raise ValueError("无效的文件大小头")
                     file_size = struct.unpack('!Q', file_size_bytes)[0]  # 使用8字节无符号整数
             
                     # 接收文件名（NULL终止）
-                    buffer = bytearray()
-                    start_time = time.time()
-                    while True:
-                        if time.time() - start_time > 10:
-                            self.status_var.set("文件名接收超时")
-                            self.file_receiving = False
-                            return
-                            
-                        chunk = conn.recv(1)
-                        if not chunk:
-                            self.status_var.set("连接中断")
-                            self.file_receiving = False
-                            return
-                            
-                        if chunk == b'\x00':
-                            break
-                            
-                        buffer.extend(chunk)
-                        if len(buffer) > 4096:
-                            self.status_var.set("文件名过长")
-                            self.file_receiving = False
-                            return
-                    
-                    filename = buffer.decode()
-                    self.status_var.set(f"正在接收文件: {filename} (大小: {file_size} 字节)")
+                    filename_bytes = read_until_null(conn)
+                    filename = filename_bytes.decode()
+                    print(f"正在接收文件: {filename} (大小: {file_size} 字节)")
             
                     # 接收文件内容
                     received = 0
-                    try:
-                        with open(filename, 'wb') as f:
-                            start_time = time.time()
-                            while received < file_size and self.running:
-                                if time.time() - start_time > 30:  # 30秒超时
-                                    self.status_var.set("文件接收超时")
-                                    break
-                                    
-                                # 计算剩余字节数
-                                remaining = file_size - received
-                                chunk_size = 4096 if remaining > 4096 else remaining
-                                
-                                data = conn.recv(chunk_size)
-                                if not data:
-                                    self.status_var.set("连接提前关闭")
-                                    break
-                                    
-                                f.write(data)
-                                received += len(data)
-                                self.status_var.set(f"接收进度: {received}/{file_size} 字节 ({received/file_size*100:.1f}%)")
-                                self.root.update()
-                    except Exception as e:
-                        self.status_var.set(f"文件接收错误: {str(e)}")
+                    with open(filename, 'wb') as f, tqdm(
+                        total=file_size,  # 总大小
+                        unit='B',        # 单位
+                        unit_scale=True,  # 自动缩放单位
+                        desc=f"接收 {filename}",  # 进度条描述
+                        ncols=80          # 进度条宽度
+                    ) as pbar:
+                        while received < file_size:
+                            data = conn.recv(min(4096, file_size - received))
+                            if not data:
+                                raise ConnectionError("连接提前关闭")
+                            f.write(data)
+                            received += len(data)
+                            pbar.update(len(data))
+                            if received == file_size:
+                                break# 更新进度条
             
                     if received == file_size:
-                        self.status_var.set("文件接收完成")
-                        self.display_message(f"已接收文件: {filename}")
+                        print("文件接收完成")
                     else:
-                        self.status_var.set(f"警告: 文件不完整 (已接收 {received}/{file_size} 字节)")
-                        messagebox.showwarning("文件接收", f"文件不完整 (已接收 {received}/{file_size} 字节)")
+                        print(f"警告: 文件不完整 (已接收 {received}/{file_size} 字节)")
 
-        except Exception as e:
-            self.status_var.set(f"文件接收错误: {str(e)}")
-            messagebox.showerror("文件接收错误", str(e))
-        finally:
-            self.file_receiving = False
+                except Exception as e:
+                    print(f"传输错误: {str(e)}")
+                    # 删除不完整文件
+                    if 'filename' in locals():
+                        if os.path.exists(filename):
+                            os.remove(filename)
+        client_socket.close()
     
     def display_message(self, message):
         self.chat_history.config(state=tk.NORMAL)
@@ -566,7 +514,7 @@ class ChatApplication:
         self.root.update()  # 强制更新UI
     
     def show_help(self):
-        help_text = """=== 加密聊天应用使用指南 ===
+        help_text = """加密聊天应用使用指南 
 
 1. 设置:
    - 生成或输入密钥: 双方必须使用相同的密钥
@@ -601,9 +549,12 @@ class ChatApplication:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    #print("DEBUG")
-    #n = input(":")
-    #if n == "VERSION" :
-        #print("0.3.4")
+    print("DEBUG")
+    print("NOTE***THE LATEST CODE HAVE A UNKNOW ERR ON SENDING FILE. SO I JUST USE THE OLD VERSION")
     app = ChatApplication(root)
     root.mainloop()
+    n = input(":")
+    if n == "VERSION" :
+        print("0.3.3")
+        
+    
